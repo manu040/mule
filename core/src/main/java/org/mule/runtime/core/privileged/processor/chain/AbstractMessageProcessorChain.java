@@ -138,9 +138,14 @@ abstract class AbstractMessageProcessorChain extends AbstractExecutableComponent
     List<BiFunction<Processor, ReactiveProcessor, ReactiveProcessor>> interceptors = resolveInterceptors();
     Flux<CoreEvent> stream = from(publisher);
     for (Processor processor : getProcessorsToExecute()) {
-      // Perform assembly for processor chain by transforming the existing publisher with a publisher function for each processor
-      // along with the interceptors that decorate it.
-      stream = stream.transform(applyInterceptors(interceptors, processor))
+      if (processor instanceof MessageProcessorChain) {
+        stream = stream.transform(processor);
+      } else {
+        // Perform assembly for processor chain by transforming the existing publisher with a publisher function for each
+        // processor along with the interceptors that decorate it.
+        stream = stream.transform(applyInterceptors(interceptors, processor));
+      }
+      stream = stream
           // #1 Register local error hook to wrap exceptions in a MessagingException maintaining failed event.
           .subscriberContext(context -> context.put(REACTOR_ON_OPERATOR_ERROR_LOCAL, getLocalOperatorErrorHook(processor)))
           // #2 Register continue error strategy to handle errors without stopping the stream.
@@ -226,17 +231,23 @@ abstract class AbstractMessageProcessorChain extends AbstractExecutableComponent
     List<BiFunction<Processor, ReactiveProcessor, ReactiveProcessor>> interceptors = new ArrayList<>();
 
     // Set thread context
-    interceptors.add((processor, next) -> stream -> from(stream)
-        // #2 Wrap execution, after processing strategy, on processor execution thread.
-        .doOnNext(event -> {
-          currentMuleContext.set(muleContext);
-          setCurrentEvent((PrivilegedEvent) event);
-        })
-        // #1 Update TCCL with the one from the Region of the processor to execute once in execution thread.
-        .transform(doOnNextOrErrorWithContext(TCCL_REACTOR_CTX_CONSUMER)
+    interceptors.add((processor, next) -> stream -> {
+      final Flux<CoreEvent> baseFlux = from(stream)
+          // #2 Wrap execution, after processing strategy, on processor execution thread.
+          .doOnNext(event -> {
+            currentMuleContext.set(muleContext);
+            setCurrentEvent((PrivilegedEvent) event);
+          });
+
+      if (processor.getClass().getName().endsWith("OperationMessageProcessor")) {
+        return baseFlux.transform(next);
+      } else {
+        return baseFlux.transform(doOnNextOrErrorWithContext(TCCL_REACTOR_CTX_CONSUMER)
             .andThen(next)
             // #1 Set back previous TCCL.
-            .andThen(doOnNextOrErrorWithContext(TCCL_ORIGINAL_REACTOR_CTX_CONSUMER))));
+            .andThen(doOnNextOrErrorWithContext(TCCL_ORIGINAL_REACTOR_CTX_CONSUMER)));
+      }
+    });
 
     // Apply processing strategy. This is done here to ensure notifications and interceptors do not execute on async processor
     // threads which may be limited to avoid deadlocks.
