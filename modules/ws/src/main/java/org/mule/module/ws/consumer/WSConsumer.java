@@ -87,8 +87,7 @@ public class WSConsumer implements MessageProcessor, Initialisable, MuleContextA
     public void initialise() throws InitialisationException
     {
         initializeConfiguration();
-        initializeWSDLLocator();
-        parseWsdl();
+        resolveWsdlData();
 
         try
         {
@@ -105,56 +104,6 @@ public class WSConsumer implements MessageProcessor, Initialisable, MuleContextA
     public MuleEvent process(MuleEvent event) throws MuleException
     {
         return messageProcessor.process(event);
-    }
-
-
-    private void initializeWSDLLocator() throws InitialisationException
-    {
-        HttpRequesterConfig httpRequesterConfig = config.getConnectorConfig();
-        String url = config.getWsdlLocation();
-
-        MuleWSDLLocatorConfig locatorConfig = createWSDLLocator(httpRequesterConfig, url);
-        try
-        {
-            wsdlLocator = new MuleWSDLLocator(locatorConfig);
-        }
-        catch (MuleException e)
-        {
-            throw new InitialisationException(e, this);
-        }
-    }
-
-
-    private MuleWSDLLocatorConfig createWSDLLocator(HttpRequesterConfig httpRequesterConfig, String url) throws InitialisationException
-    {
-        MuleWSDLLocatorConfig locatorConfig = null;
-        
-        if (httpRequesterConfig == null && config.isUseConnectorToRetrieveWsdl())
-        {
-            throw new InitialisationException(CoreMessages.createStaticMessage("The useConnectorToRetrieveWsdl option requires connectorConfig to work"),
-                    this);
-        }
-        
-        if (httpRequesterConfig == null)
-        {
-
-            locatorConfig = new MuleWSDLLocatorConfig.Builder()
-                                                               .setBaseURI(url)
-                                                               .setContext(muleContext)
-                                                               .build();
-        }
-        else
-        {
-            locatorConfig = new MuleWSDLLocatorConfig.Builder()
-                    .setBaseURI(url)
-                    .setTlsContextFactory(httpRequesterConfig.getTlsContext())
-                    .setContext(muleContext)
-                    .setUseConnectorToRetrieveWsdl(config.isUseConnectorToRetrieveWsdl())
-                    .setProxyConfig(httpRequesterConfig.getProxyConfig())
-                    .build();
-
-        }
-        return locatorConfig;
     }
 
     /**
@@ -389,10 +338,10 @@ public class WSConsumer implements MessageProcessor, Initialisable, MuleContextA
     }
 
     /**
-     * Parses the WSDL file in order to validate the service, port and operation, to get the SOAP Action (if defined)
+     * Resolves the WSDL file in order to validate the service, port and operation, to get the SOAP Action (if defined)
      * and to check if the operation requires input parameters or not.
      */
-    private void parseWsdl() throws InitialisationException
+    private void resolveWsdlData() throws InitialisationException
     {
         Definition wsdlDefinition = null;
 
